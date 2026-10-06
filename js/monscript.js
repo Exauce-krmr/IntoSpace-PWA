@@ -10,27 +10,17 @@ function checkCollisions(box1, box2){
 }
 
 
-/* Pilotage du vaisseau par les capteurs de position du telephone */
+/* Pilotage du vaisseau au clavier (desktop) et au doigt/souris (mobile et desktop) */
 
 let starship = null;
 let monde = null;
 let asteroidsContainer = null;
 let scoreElement = null;
 
-// Position de depart du vaisseau (identique aux valeurs par defaut de style.css)
-let startLeftPercent = 38;
-let startTopPercent = 44;
-
-// Inclinaison de reference : capturee au demarrage, elle sert de "position de depart"
-let baseBeta = null;
-let baseGamma = null;
-
-// Dernier relevé brut du capteur (mis a jour par l'evenement, applique par le timer)
-let currentBeta = 0;
-let currentGamma = 0;
-
-let maxTiltDeg = 25;        // inclinaison au dela de laquelle le vaisseau ne va pas plus loin
-let maxOffsetPercent = 30;  // deplacement max autour de la position de depart
+let shipWidth = 115;  // doit rester synchronise avec #starship dans style.css
+let shipHeight = 55;
+let shipX = 0;         // position du coin haut-gauche du vaisseau, en px
+let shipY = 0;
 
 let score = 0;
 let gameOver = false;
@@ -42,68 +32,73 @@ let spawnTimer = null;
 
 let moveIntervalMs = 30;    // frequence de la boucle de jeu (deplacement + collisions)
 let spawnIntervalMs = 1500; // frequence d'apparition des asteroides
+let keyboardSpeed = 6;      // px par tick quand une touche est maintenue
 
 function clamp(value, min, max){
 	return Math.max(min, Math.min(max, value));
 }
 
-// L'angle de l'ecran (0, 90, 180, -90) : le jeu est bloque en paysage,
-// mais beta/gamma restent toujours donnes par rapport au portrait naturel du telephone
-function getScreenAngle(){
-	if(typeof window.orientation === "number"){
-		return window.orientation;
-	}
-	if(screen.orientation && typeof screen.orientation.angle === "number"){
-		return screen.orientation.angle === 270 ? -90 : screen.orientation.angle;
-	}
-	return 0;
+function clampShipPosition(){
+	shipX = clamp(shipX, 0, window.innerWidth - shipWidth);
+	shipY = clamp(shipY, 0, window.innerHeight - shipHeight);
 }
 
-function handleOrientation(event){
-	if(event.beta === null || event.gamma === null) return;
+// Clavier : fleches ou WASD
+let KEY_DIRECTIONS = {
+	"ArrowUp": [0, -1], "KeyW": [0, -1],
+	"ArrowDown": [0, 1], "KeyS": [0, 1],
+	"ArrowLeft": [-1, 0], "KeyA": [-1, 0],
+	"ArrowRight": [1, 0], "KeyD": [1, 0]
+};
+let keysPressed = {};
 
-	// On remet beta/gamma dans le repere de l'ecran (paysage) avant de s'en servir
-	let beta = event.beta;
-	let gamma = event.gamma;
-	let adjBeta = beta;
-	let adjGamma = gamma;
+function handleKeyDown(event){
+	keysPressed[event.code] = true;
+}
 
-	switch(getScreenAngle()){
-		case 90:
-			adjBeta = -gamma;
-			adjGamma = beta;
-			break;
-		case -90:
-			adjBeta = gamma;
-			adjGamma = -beta;
-			break;
-		case 180:
-			adjBeta = -beta;
-			adjGamma = -gamma;
-			break;
+function handleKeyUp(event){
+	keysPressed[event.code] = false;
+}
+
+function moveFromKeyboard(){
+	let dx = 0, dy = 0;
+	for(let code in KEY_DIRECTIONS){
+		if(keysPressed[code]){
+			dx += KEY_DIRECTIONS[code][0];
+			dy += KEY_DIRECTIONS[code][1];
+		}
 	}
+	if(dx === 0 && dy === 0) return;
 
-	if(baseBeta === null){
-		// Le premier relevé de capteur = position de depart du telephone
-		baseBeta = adjBeta;
-		baseGamma = adjGamma;
-	}
+	let length = Math.sqrt(dx * dx + dy * dy);
+	shipX += (dx / length) * keyboardSpeed;
+	shipY += (dy / length) * keyboardSpeed;
+	clampShipPosition();
+}
 
-	currentBeta = adjBeta;
-	currentGamma = adjGamma;
+// Souris / tactile : le vaisseau suit le pointeur (fonctionne sur desktop et mobile)
+let dragging = false;
+let pointerOffsetY = -40; // le vaisseau reste visible au dessus du doigt sur mobile
+
+function handlePointerMove(event){
+	if(!dragging) return;
+	shipX = event.clientX - shipWidth / 2;
+	shipY = event.clientY - shipHeight / 2 + pointerOffsetY;
+	clampShipPosition();
+}
+
+function handlePointerDown(event){
+	dragging = true;
+	handlePointerMove(event);
+}
+
+function handlePointerUp(){
+	dragging = false;
 }
 
 function moveStarship(){
-	if(baseBeta === null) return;
-
-	let deltaBeta = clamp(currentBeta - baseBeta, -maxTiltDeg, maxTiltDeg);
-	let deltaGamma = clamp(currentGamma - baseGamma, -maxTiltDeg, maxTiltDeg);
-
-	let offsetLeft = (deltaGamma / maxTiltDeg) * maxOffsetPercent;
-	let offsetTop = (deltaBeta / maxTiltDeg) * maxOffsetPercent;
-
-	starship.style.left = (startLeftPercent + offsetLeft) + "%";
-	starship.style.top = (startTopPercent + offsetTop) + "%";
+	starship.style.left = shipX + "px";
+	starship.style.top = shipY + "px";
 }
 
 function spawnAsteroid(){
@@ -171,7 +166,6 @@ function explode(){
 	gameOver = true;
 	clearInterval(moveTimer);
 	clearInterval(spawnTimer);
-	window.removeEventListener("deviceorientation", handleOrientation);
 
 	starship.classList.add("exploding");
 
@@ -182,6 +176,7 @@ function explode(){
 
 function gameLoop(){
 	if(gameOver) return;
+	moveFromKeyboard();
 	moveStarship();
 	moveAsteroids();
 }
@@ -192,7 +187,18 @@ function initGame(){
 	asteroidsContainer = document.getElementById("asteroids");
 	scoreElement = document.getElementById("score");
 
-	window.addEventListener("deviceorientation", handleOrientation);
+	// Position de depart (identique aux valeurs par defaut de style.css)
+	shipX = window.innerWidth * 0.38;
+	shipY = window.innerHeight * 0.44;
+	clampShipPosition();
+
+	window.addEventListener("keydown", handleKeyDown);
+	window.addEventListener("keyup", handleKeyUp);
+
+	monde.addEventListener("pointerdown", handlePointerDown);
+	window.addEventListener("pointermove", handlePointerMove);
+	window.addEventListener("pointerup", handlePointerUp);
+	window.addEventListener("pointercancel", handlePointerUp);
 
 	moveTimer = setInterval(gameLoop, moveIntervalMs);
 	spawnTimer = setInterval(spawnAsteroid, spawnIntervalMs);

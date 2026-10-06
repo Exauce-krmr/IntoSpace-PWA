@@ -9,6 +9,7 @@
 	left: 0px;
 	top: 0px;
 	user-select: none;
+	touch-action: none;
 	background-image: url("../img/background.jpg");
 	background-repeat: repeat;
 	background-size: 120%;
